@@ -1,0 +1,9 @@
+/node_modules
+/dist
+.DS_Store
+.env*.local
+*.tsbuildinfo
+
+# Your maps stay on your computer
+/data/*
+!/data/README.md
