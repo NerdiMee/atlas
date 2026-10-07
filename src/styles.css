@@ -85,7 +85,7 @@ code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
 @media (prefers-reduced-motion: reduce) { .wires .flow { animation: none; opacity: .35; } }
 
 .block {
-  position: absolute; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2);
+  position: absolute; will-change: left, top; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg-2);
   padding: 10px 12px; cursor: move; user-select: none; overflow: hidden;
   box-shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 6px 18px rgba(0,0,0,.25);
   transition: box-shadow .15s, border-color .15s;
@@ -401,9 +401,5 @@ code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
 .coach .dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.18); }
 .coach .dots i.on { background: var(--good); }
 
-/* celebration */
-.confetti { position: absolute; inset: 0; pointer-events: none; z-index: 9; }
-.toast.cheer { border-left-color: var(--xp); font-weight: 500; }
-.toast.cheer b { color: var(--xp); margin-right: 6px; }
 .app.present .quest, .app.present .pkey, .app.present .pcard, .app.present .top .mode, .app.present .play-go { display: none !important; }
 .story ~ .toast { bottom: 196px; }

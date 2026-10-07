@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { easeCubicOut, interpolateNumber, timer } from "d3";
 import Icon from "./Icons";
 import { KINDS, MODES, type Block, type Kind, type Link, type Problem, type System } from "./model";
 import { plain, wireKind, type StoryStep } from "./narrate";
@@ -13,19 +14,29 @@ import type { Sel } from "./Canvas";
 export function Quest({ missions, onBuild }: { missions: Mission[]; onBuild: () => void }) {
   const s = score(missions);
   const next = missions.find((m) => !m.done);
+  const done = missions.filter((m) => m.done).length;
   const [open, setOpen] = useState<string | null>(null);
   const r = 22, c = 2 * Math.PI * r;
+  // The ring and its number ease to the new value rather than jumping.
+  const [pct, setPct] = useState(s.pct);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) { setPct(s.pct); return; }
+    const from = pct, lerp = interpolateNumber(from, s.pct);
+    const t = timer((ms) => { const u = easeCubicOut(Math.min(1, ms / 700)); setPct(Math.round(lerp(u))); if (u >= 1) t.stop(); });
+    return () => t.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [s.pct]);
   return (
     <aside className="quest" aria-label="Missions">
       <header>
         <svg className="ring" viewBox="0 0 56 56" aria-hidden="true">
           <circle cx="28" cy="28" r={r} />
-          <circle cx="28" cy="28" r={r} className="val" strokeDasharray={c} strokeDashoffset={c * (1 - s.pct / 100)} />
-          <text x="28" y="32" textAnchor="middle">{s.pct}%</text>
+          <circle cx="28" cy="28" r={r} className="val" strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} />
+          <text x="28" y="32" textAnchor="middle">{pct}%</text>
         </svg>
         <div>
-          <b>Level {s.levelNo} · {s.level}</b>
-          <span>{s.xp} XP{s.next ? ` · ${s.next} to the next level` : " · top level"}</span>
+          <b>{s.level}</b>
+          <span>{done} of {missions.length} done · {pct}% understood</span>
         </div>
       </header>
       {next && (
@@ -42,7 +53,7 @@ export function Quest({ missions, onBuild }: { missions: Mission[]; onBuild: () 
             <button onClick={() => setOpen((o) => (o === m.id ? null : m.id))} aria-expanded={open === m.id}>
               <span className="check" aria-hidden="true">{m.done ? "✓" : ""}</span>
               <span className="t">{m.title}</span>
-              <span className="xp">{m.progress && !m.done ? m.progress : `${m.xp} XP`}</span>
+              {m.progress && !m.done && <span className="xp">{m.progress}</span>}
             </button>
             {open === m.id && (
               <div className="more">
@@ -177,7 +188,7 @@ const COACH = [
   { title: "Welcome to Atlas", text: "Atlas draws how a project fits together: the apps people use, the servers, the database and the outside services, with wires between them. Think of it as a board game of your software." },
   { title: "Pieces", text: "Each box is one real thing. Phones and websites are on the left, the database is on the right. Click any piece and a card tells you what it does in plain words." },
   { title: "Wires", text: "A wire is a conversation. The arrow shows who asks and who answers. Wires that cannot work are red, and Atlas will tell you why." },
-  { title: "Missions", text: "The card on the left gives you small missions. Each one teaches one idea and earns XP. Finish them all and you understand the whole system." },
+  { title: "Missions", text: "The card on the left gives you small missions. Each one teaches one idea about the system. Finish them all and you understand the whole of it." },
 ];
 export function Coach({ onDone }: { onDone: () => void }) {
   const [i, setI] = useState(0);
@@ -197,44 +208,4 @@ export function Coach({ onDone }: { onDone: () => void }) {
       </div>
     </div>
   );
-}
-
-/** A short burst of confetti from the middle of the stage. */
-export function Confetti({ seed }: { seed: number }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    if (!seed) return;
-    const c = ref.current;
-    if (!c) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const ctx = c.getContext("2d");
-    if (!ctx) return;
-    c.width = c.clientWidth; c.height = c.clientHeight;
-    const colors = ["#3ddc97", "#4f8cff", "#f2c14e", "#ff7ab6", "#e9ebee"];
-    const ps = Array.from({ length: 90 }, () => ({ x: c.width / 2, y: c.height * 0.55, vx: (Math.random() - 0.5) * 14, vy: -Math.random() * 12 - 4, r: 3 + Math.random() * 4, a: Math.random() * Math.PI, c: colors[Math.floor(Math.random() * colors.length)] }));
-    let t = 0, raf = 0;
-    const tick = () => {
-      t += 1;
-      ctx.clearRect(0, 0, c.width, c.height);
-      for (const p of ps) { p.vy += 0.35; p.x += p.vx; p.y += p.vy; p.a += 0.2; ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.a); ctx.fillStyle = p.c; ctx.globalAlpha = Math.max(0, 1 - t / 80); ctx.fillRect(-p.r, -p.r / 2, p.r * 2, p.r); ctx.restore(); }
-      if (t < 85) raf = requestAnimationFrame(tick); else ctx.clearRect(0, 0, c.width, c.height);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [seed]);
-  return <canvas ref={ref} className="confetti" aria-hidden="true" />;
-}
-
-/** A soft two-note chime for a finished mission. */
-export function chime() {
-  try {
-    const ac = new AudioContext();
-    [[660, 0], [990, 0.12]].forEach(([f, at]) => {
-      const o = ac.createOscillator(); const g = ac.createGain();
-      o.type = "sine"; o.frequency.value = f;
-      g.gain.setValueAtTime(0.0001, ac.currentTime + at); g.gain.exponentialRampToValueAtTime(0.06, ac.currentTime + at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + at + 0.35);
-      o.connect(g).connect(ac.destination); o.start(ac.currentTime + at); o.stop(ac.currentTime + at + 0.4);
-    });
-    setTimeout(() => void ac.close(), 700);
-  } catch { /* no audio */ }
 }

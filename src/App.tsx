@@ -9,7 +9,7 @@ import { onSpeech, prime, speak, stop as hush } from "./voice";
 import ImportDialog from "./Import";
 import type { Snap } from "./diff";
 import { openReport, tourHtml } from "./report";
-import { Coach, Confetti, Idle, Key, PieceCard, Quest, Story, WireCard, chime } from "./Play";
+import { Coach, Idle, Key, PieceCard, Quest, Story, WireCard } from "./Play";
 import { FRESH, missionsFor, type Progress } from "./missions";
 
 const LS_SYS = (id: string) => `atlas.system.${id}`;
@@ -134,7 +134,6 @@ export default function App() {
   const [storyAt, setStoryAt] = useState<number | null>(null);
   const [storyAuto, setStoryAuto] = useState(false);
   const [coach, setCoach] = useState(() => !read<boolean>("atlas.coached"));
-  const [cheer, setCheer] = useState(0);
   const bump = useCallback((patch: Partial<Progress> | ((p: Progress) => Progress)) => setProgress((p) => (typeof patch === "function" ? patch(p) : { ...p, ...patch })), []);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastEdit = useRef<{ key: string; at: number }>({ key: "", at: 0 });
@@ -305,9 +304,7 @@ export default function App() {
     const fresh = missions.filter((m) => m.done && !progress.celebrated.includes(m.id));
     if (!fresh.length) return;
     bump((p) => ({ ...p, celebrated: [...p.celebrated, ...fresh.map((m) => m.id)] }));
-    if (!mute) chime();
-    setCheer(Date.now());
-    setToast({ tone: "good", text: `Mission complete: ${fresh.map((m) => m.title).join(", ")} · +${fresh.reduce((n, m) => n + m.xp, 0)} XP` });
+    setToast({ tone: "good", text: `Done: ${fresh.map((m) => m.title).join(", ")}` });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missions, play]);
   const storyStep = storyAt === null || !steps.length ? null : steps[Math.min(storyAt, steps.length - 1)];
@@ -971,7 +968,7 @@ export default function App() {
           </div>
         )}
 
-        {view === "board" ? <Board {...viewProps} onRefuse={refuse} /> : <Canvas {...viewProps} />}
+        {view === "board" ? <Board {...viewProps} onRefuse={refuse} /> : <Canvas {...viewProps} flyTo={storyFocus} />}
 
         {present && (
           <div className="presentBar" role="toolbar" aria-label="Presentation">
@@ -1058,7 +1055,6 @@ export default function App() {
         {storyStep && storyAt !== null && (
           <Story steps={steps} index={Math.min(storyAt, steps.length - 1)} auto={storyAuto} onIndex={setStoryAt} onAuto={setStoryAuto} onClose={() => closeStory(storyAt >= steps.length - 1)} />
         )}
-        <Confetti seed={cheer} />
         {play && coach && !!system.id && !importing && (
           <Coach
             onDone={() => {

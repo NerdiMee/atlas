@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { easeCubicInOut, easeCubicOut, interpolate, select, timer, zoom as d3zoom, zoomIdentity, type ZoomBehavior } from "d3";
 import HoverCard, { WireTip } from "./Hover";
-import type { CSSProperties, PointerEvent as RPointerEvent, WheelEvent as RWheelEvent } from "react";
+import type { CSSProperties, PointerEvent as RPointerEvent } from "react";
 import Icon from "./Icons";
 import { KINDS, MODES, blockHeight, type Block, type Kind, type Link, type Problem, type System } from "./model";
 
@@ -25,6 +26,8 @@ type Props = {
   onHint?: (h: { block?: string; link?: string; ghost?: boolean }) => void;
   /** Overlay widths Fit keeps clear: the cards on the left and right of the stage. */
   inset?: { left: number; right: number };
+  /** Blocks the view should glide to and frame (the story's current step). */
+  flyTo?: Set<string> | null;
 };
 
 type View = { x: number; y: number; k: number };
@@ -60,11 +63,67 @@ function bezier(a: Pt, na: Pt, b: Pt, nb: Pt, t: number) {
   return { d: `M${a.x},${a.y} C${p1.x},${p1.y} ${p2.x},${p2.y} ${b.x},${b.y}`, mid };
 }
 
-export default function Canvas({ system, selected, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect, onMove, onLinkTarget, onHint, inset }: Props) {
+export default function Canvas({ system, selected, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect, onMove, onLinkTarget, onHint, inset, flyTo }: Props) {
   const [view, setView] = useState<View>({ x: 200, y: 70, k: 0.8 });
   const [hoverBlock, setHoverBlock] = useState<{ id: string; x: number; y: number } | null>(null);
   const hoverTimer = useRef<number | null>(null);
   const isDim = (b: Block) => hidden.has(b.kind) || (!!focus && !focus.has(b.id));
+
+  const [panning, setPanning] = useState(false);
+  const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (hoverBlock) onHint?.({ block: hoverBlock.id });
+    else if (hover) onHint?.({ link: hover.id, ghost: !!suggestions?.some((l) => l.id === hover.id) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverBlock?.id, hover?.id]);
+  const press = useRef<{ sx: number; sy: number } | null>(null);
+  const drag = useRef<{ id: string; sx: number; sy: number; bx: number; by: number; moved: boolean } | null>(null);
+  const el = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef<ZoomBehavior<HTMLDivElement, unknown> | null>(null);
+  const reduce = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
+  const [zoomReady, setZoomReady] = useState(false);
+  const fitted = useRef(false);
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
+  // Pan and zoom are d3-zoom: wheel zooms about the pointer, drag on empty space pans,
+  // and Fit or a story step glide there instead of jumping.
+  useEffect(() => {
+    const host = el.current;
+    if (!host) return;
+    const z = d3zoom<HTMLDivElement, unknown>()
+      .scaleExtent([0.3, 2.5])
+      .filter((e: Event & { button?: number }) => {
+        if (e.type === "wheel") return true;
+        if (e.button) return false;
+        const t = e.target as Element | null;
+        return !t?.closest(".block") && !t?.closest(".hit");
+      })
+      .on("start", (e) => { if (e.sourceEvent && e.sourceEvent.type !== "wheel") setPanning(true); })
+      .on("zoom", (e) => setView({ x: e.transform.x, y: e.transform.y, k: e.transform.k }))
+      .on("end", () => setPanning(false));
+    select(host).call(z).on("dblclick.zoom", null);
+    zoomRef.current = z;
+    setZoomReady(true);
+    return () => { select(host).on(".zoom", null); zoomRef.current = null; };
+  }, []);
+
+  // The story's step: frame those blocks in the free middle, keeping the scale unless they would not fit.
+  useEffect(() => {
+    const host = el.current;
+    const z = zoomRef.current;
+    if (!host || !z || !flyTo || flyTo.size === 0) return;
+    const bs = system.blocks.filter((b) => flyTo.has(b.id));
+    if (!bs.length) return;
+    const minX = Math.min(...bs.map((b) => b.x)), maxX = Math.max(...bs.map((b) => b.x + b.w));
+    const minY = Math.min(...bs.map((b) => b.y)), maxY = Math.max(...bs.map((b) => b.y + blockHeight(b)));
+    const left = inset?.left ?? 200, right = inset?.right ?? 380;
+    const availW = host.clientWidth - left - right, availH = host.clientHeight - 100;
+    const k = Math.max(0.6, Math.min(viewRef.current.k, availW / (maxX - minX + 120), availH / (maxY - minY + 120)));
+    const t = zoomIdentity.translate(left + availW / 2 - ((minX + maxX) / 2) * k, 50 + availH / 2 - ((minY + maxY) / 2) * k).scale(k);
+    select(host).transition().duration(reduce ? 0 : 700).ease(easeCubicInOut).call(z.transform, t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyTo]);
 
   // Fit: frame every block in the space left of the panel and right of the legend.
   useEffect(() => {
@@ -78,50 +137,55 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
     const availW = host.clientWidth - left - (inset?.right ?? 380);
     const availH = host.clientHeight - 100;
     const k = Math.min(1.4, Math.max(0.3, Math.min(availW / (maxX - minX + 40), availH / (maxY - minY + 40))));
-    setView({ k, x: left + (availW - (maxX - minX) * k) / 2 - minX * k, y: 50 + (availH - (maxY - minY) * k) / 2 - minY * k });
+    const t = zoomIdentity.translate(left + (availW - (maxX - minX) * k) / 2 - minX * k, 50 + (availH - (maxY - minY) * k) / 2 - minY * k).scale(k);
+    const z = zoomRef.current;
+    if (!z) return;
+    if (!fitted.current && flyTo?.size) { fitted.current = true; return; } // a story step is already framing the map
+    const v = viewRef.current;
+    if (fitted.current && Math.abs(v.x - t.x) < 0.5 && Math.abs(v.y - t.y) < 0.5 && Math.abs(v.k - t.k) < 0.001) return;
+    if (fitted.current) select(host).transition().duration(reduce ? 0 : 650).ease(easeCubicInOut).call(z.transform, t);
+    else select(host).call(z.transform, t);
+    fitted.current = true;
     // Runs on Fit, when the system changes identity or its blocks first arrive, and when the overlays change; not on every block move.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fitKey, system.id, system.blocks.length > 0, inset?.left, inset?.right]);
-  const [panning, setPanning] = useState(false);
-  const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
+  }, [fitKey, system.id, system.blocks.length > 0, inset?.left, inset?.right, zoomReady]);
+  // Where each block is drawn. A dragged block follows the pointer; any other move (Tidy, undo, a load) glides.
+  const [shown, setShown] = useState<Map<string, Pt>>(() => new Map(system.blocks.map((b) => [b.id, { x: b.x, y: b.y }])));
+  const shownRef = useRef(shown);
+  shownRef.current = shown;
   useEffect(() => {
-    if (hoverBlock) onHint?.({ block: hoverBlock.id });
-    else if (hover) onHint?.({ link: hover.id, ghost: !!suggestions?.some((l) => l.id === hover.id) });
+    const cur = shownRef.current;
+    const moved = system.blocks.filter((b) => { const p = cur.get(b.id); return !p || p.x !== b.x || p.y !== b.y; });
+    const gone = [...cur.keys()].some((id) => !byId.has(id));
+    if (!moved.length && !gone) return;
+    const snap = reduce || !!drag.current || moved.every((b) => !cur.has(b.id));
+    if (snap) {
+      setShown(new Map(system.blocks.map((b) => [b.id, { x: b.x, y: b.y }])));
+      return;
+    }
+    const from = new Map(moved.map((b) => [b.id, cur.get(b.id) ?? { x: b.x, y: b.y }]));
+    const lerp = new Map(moved.map((b) => [b.id, interpolate(from.get(b.id)!, { x: b.x, y: b.y })]));
+    const t = timer((ms) => {
+      const u = easeCubicOut(Math.min(1, ms / 520));
+      setShown(new Map(system.blocks.map((b) => [b.id, lerp.has(b.id) ? lerp.get(b.id)!(u) : shownRef.current.get(b.id) ?? { x: b.x, y: b.y }])));
+      if (u >= 1) t.stop();
+    });
+    return () => t.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hoverBlock?.id, hover?.id]);
-  const pan = useRef<{ sx: number; sy: number; vx: number; vy: number } | null>(null);
-  const drag = useRef<{ id: string; sx: number; sy: number; bx: number; by: number; moved: boolean } | null>(null);
-  const el = useRef<HTMLDivElement>(null);
+  }, [system.blocks]);
+  const placed = useMemo(() => system.blocks.map((b) => ({ ...b, ...(shown.get(b.id) ?? {}) })), [system.blocks, shown]);
 
   const byId = useMemo(() => new Map(system.blocks.map((b) => [b.id, b])), [system.blocks]);
 
-  const onWheel = (e: RWheelEvent) => {
-    const rect = el.current!.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    setView((v) => {
-      const k = Math.min(2.5, Math.max(0.3, v.k * Math.exp(-e.deltaY * 0.0012)));
-      return { k, x: mx - (mx - v.x) * (k / v.k), y: my - (my - v.y) * (k / v.k) };
-    });
-  };
-
+  // A press on empty space that does not travel clears the selection; the travelling kind is a pan, which d3-zoom handles.
   const bgDown = (e: RPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    pan.current = { sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
-    el.current!.setPointerCapture(e.pointerId);
-    setPanning(true);
-  };
-  const bgMove = (e: RPointerEvent<HTMLDivElement>) => {
-    const p = pan.current;
-    if (!p) return;
-    setView((v) => ({ ...v, x: p.vx + (e.clientX - p.sx), y: p.vy + (e.clientY - p.sy) }));
+    press.current = { sx: e.clientX, sy: e.clientY };
   };
   const bgUp = (e: RPointerEvent<HTMLDivElement>) => {
-    if (!pan.current) return;
-    const moved = Math.hypot(e.clientX - pan.current.sx, e.clientY - pan.current.sy) > 3;
-    pan.current = null;
-    setPanning(false);
-    if (!moved) onSelect(null);
+    const p = press.current;
+    press.current = null;
+    if (p && Math.hypot(e.clientX - p.sx, e.clientY - p.sy) <= 3) onSelect(null);
   };
 
   const blockDown = (b: Block) => (e: RPointerEvent<HTMLDivElement>) => {
@@ -132,7 +196,8 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
       return;
     }
     onSelect({ type: "block", id: b.id });
-    drag.current = { id: b.id, sx: e.clientX, sy: e.clientY, bx: b.x, by: b.y, moved: false };
+    const real = byId.get(b.id) ?? b; // not the in-flight position if it is still gliding
+    drag.current = { id: b.id, sx: e.clientX, sy: e.clientY, bx: real.x, by: real.y, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const blockMove = (e: RPointerEvent<HTMLDivElement>) => {
@@ -165,17 +230,18 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
     const all = [...system.links, ...(suggestions ?? [])];
     const ghosts = new Set((suggestions ?? []).map((l) => l.id));
     const port = new Map<string, { out: number; inn: number }>();
-    for (const b of system.blocks) {
-      const outs = all.filter((l) => l.from === b.id && byId.has(l.to)).sort((p, q) => centre(byId.get(p.to)!).y - centre(byId.get(q.to)!).y);
-      const ins = all.filter((l) => l.to === b.id && byId.has(l.from)).sort((p, q) => centre(byId.get(p.from)!).y - centre(byId.get(q.from)!).y);
+    const pById = new Map(placed.map((b) => [b.id, b]));
+    for (const b of placed) {
+      const outs = all.filter((l) => l.from === b.id && pById.has(l.to)).sort((p, q) => centre(pById.get(p.to)!).y - centre(pById.get(q.to)!).y);
+      const ins = all.filter((l) => l.to === b.id && pById.has(l.from)).sort((p, q) => centre(pById.get(p.from)!).y - centre(pById.get(q.from)!).y);
       const step = (n: number) => Math.min(22, (blockHeight(b) - 16) / Math.max(1, n));
       outs.forEach((l, i) => port.set(l.id, { ...(port.get(l.id) ?? { out: 0, inn: 0 }), out: (i - (outs.length - 1) / 2) * step(outs.length) }));
       ins.forEach((l, i) => port.set(l.id, { ...(port.get(l.id) ?? { out: 0, inn: 0 }), inn: (i - (ins.length - 1) / 2) * step(ins.length) }));
     }
     const out: { l: Link; d: string; mid: Pt; dim: boolean; ghost: boolean }[] = [];
     for (const l of all) {
-      const a = byId.get(l.from);
-      const b = byId.get(l.to);
+      const a = pById.get(l.from);
+      const b = pById.get(l.to);
       if (!a || !b) continue;
       const pp = port.get(l.id) ?? { out: 0, inn: 0 };
       const sa = anchor(a, true, pp.out);
@@ -185,7 +251,7 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [system.links, system.blocks, suggestions, byId, hidden, focus]);
+  }, [system.links, placed, suggestions, hidden, focus]);
 
   const hovered = hover ? [...system.links, ...(suggestions ?? [])].find((l) => l.id === hover.id) : undefined;
   const hoveredProblem = hover ? problems.get(hover.id) : undefined;
@@ -201,11 +267,8 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
       ref={el}
       className={`canvas${panning ? " panning" : ""}${linkFrom ? " linking" : ""}`}
       style={bg}
-      onWheel={onWheel}
       onPointerDown={bgDown}
-      onPointerMove={bgMove}
       onPointerUp={bgUp}
-      onPointerCancel={bgUp}
     >
       <div className="world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}>
         <svg className="wires" width="1" height="1" style={{ overflow: "visible" }} aria-hidden="true">
@@ -269,7 +332,7 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
           })}
         </svg>
 
-        {system.blocks.map((b) => {
+        {placed.map((b) => {
           const sel = selected?.type === "block" && selected.id === b.id;
           const cls = [
             "block",

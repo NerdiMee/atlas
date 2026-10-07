@@ -49,12 +49,13 @@ export function missionsFor(s: System, problems: Map<string, Problem>, p: Progre
   return out;
 }
 
+/** How far along you are, in words. Thresholds are points out of the missions' total. */
 export const LEVELS = [
-  { at: 0, name: "Newcomer" },
-  { at: 40, name: "Explorer" },
-  { at: 90, name: "Navigator" },
-  { at: 150, name: "Engineer" },
-  { at: 200, name: "Architect" },
+  { at: 0, name: "Getting started" },
+  { at: 40, name: "Finding your way" },
+  { at: 90, name: "Knows the map" },
+  { at: 150, name: "Knows the system" },
+  { at: 200, name: "Could rebuild it" },
 ];
 export function score(missions: Mission[]) {
   const total = missions.reduce((n, m) => n + m.xp, 0);
