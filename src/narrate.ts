@@ -152,6 +152,33 @@ export function tour(s: System, problems: Map<string, Problem>): Step[] {
   return steps;
 }
 
+/** The same walk as the tour, cut into cards for the Story player: a short title per step, so you can go back and forward at your own pace. */
+export type StoryStep = Step & { kicker: string; title: string };
+export function story(s: System, problems: Map<string, Problem>): StoryStep[] {
+  const out: StoryStep[] = [];
+  const apps = s.blocks.filter((b) => ["web", "desktop", "handset"].includes(b.kind)).length;
+  out.push({ sel: null, kicker: "Start", title: `This is ${s.name}`, text: `${plain(s.tagline)}. ${plain(s.note)} ${n(apps, "app")}, ${n(s.blocks.length, "piece")} and ${n(s.links.length, "wire")}. Press Next and we go through it one step at a time.` });
+  const roles = s.blocks.filter((b) => b.kind !== "planned" && b.status !== "drawn");
+  for (const b of roles.filter((b) => b.kind === "store" || b.kind === "supabase" || isServer(b))) {
+    out.push({ sel: { type: "block", id: b.id }, kicker: "A main piece", title: b.title, text: `${b.title} is ${role(b)}. ${plain(b.lines.slice(0, 2).join(". "))}.` });
+  }
+  const wires = flowOrder(s);
+  wires.forEach((l, i) => {
+    const p = problems.get(l.id);
+    out.push({ sel: { type: "link", id: l.id }, kicker: `Wire ${i + 1} of ${wires.length}`, title: `${name(s, l.from)} → ${name(s, l.to)}`, text: describeLink(s, l, p) });
+  });
+  const attention = s.blocks.filter((b) => b.status === "warn");
+  for (const b of attention) {
+    const f = b.details.find((d) => d.label.toLowerCase().startsWith("finding"))?.value;
+    out.push({ sel: { type: "block", id: b.id }, kicker: "Needs fixing", title: b.title, text: f ? plain(f) : "Flagged, but nobody has written down why yet." });
+  }
+  const planned = s.blocks.filter((b) => b.kind === "planned" || b.status === "drawn");
+  if (planned.length) out.push({ sel: null, kicker: "Still plans", title: `${n(planned.length, "piece")} not built yet`, text: `${planned.map((b) => b.title).join(", ")}. Nothing moves on their wires until they are built.` });
+  const bad = [...problems.values()].filter((p) => p.level === "bad").length;
+  out.push({ sel: null, kicker: "The end", title: bad ? `${n(bad, "wire")} to fix` : "Every wire follows the rules", text: bad ? "That is the whole system. Fix those wires and it all works." : "That is the whole system. You have seen every piece and every wire." });
+  return out;
+}
+
 export const greeting = (s: System) => `Voice on. Click any piece or wire and I will tell you what it does, in plain words. Explain takes you round the whole of ${s.name}.`;
 
 /** The suggestion in one breath: what kinds of wires are proposed, and that each waits for a yes. */

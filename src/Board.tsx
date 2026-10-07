@@ -31,6 +31,7 @@ type Props = {
   onLinkTarget: (id: string) => void;
   /** The pointer is resting on this block or wire: a chance to get its explanation ready. */
   onHint?: (h: { block?: string; link?: string; ghost?: boolean }) => void;
+  inset?: { left: number; right: number };
   onRefuse: (p: Problem, blockId?: string) => void;
 };
 
@@ -95,19 +96,24 @@ function curveOf(pa: THREE.Vector3, pb: THREE.Vector3) {
 }
 
 /** Sets the camera to frame the whole board whenever its size changes. */
-function Rig({ d, fitKey }: { d: Dims; fitKey: number }) {
-  const { camera } = useThree();
+function Rig({ d, fitKey, inset }: { d: Dims; fitKey: number; inset?: { left: number; right: number } }) {
+  const { camera, size } = useThree();
   const controls = useThree((s) => s.controls) as unknown as { target: THREE.Vector3; update: () => void } | null;
+  const left = inset?.left ?? 0, right = inset?.right ?? 0;
   useEffect(() => {
-    const span = Math.max(d.cols, d.rows * 1.4);
-    camera.position.set(0, span * 0.9, span * 0.72);
-    camera.lookAt(0, 0, 0);
+    // Pull back enough that the board fits between the overlays, and slide it into the free middle.
+    const free = Math.max(300, size.width - left - right);
+    const zoom = 1 + (size.width / free - 1) * 0.32;
+    const span = Math.max(d.cols, d.rows * 1.4) * zoom;
+    const shift = (-(left - right) / 2 / size.width) * span;
+    camera.position.set(shift, span * 0.9, span * 0.72);
+    camera.lookAt(shift, 0, 0);
     camera.updateProjectionMatrix();
     if (controls) {
-      controls.target.set(0, 0, 0);
+      controls.target.set(shift, 0, 0);
       controls.update();
     }
-  }, [camera, controls, d.cols, d.rows, fitKey]);
+  }, [camera, controls, d.cols, d.rows, fitKey, size.width, left, right]);
   return null;
 }
 
@@ -261,7 +267,7 @@ function Wire({ a, ports, tone, dashed, ghost, label, dim, live, onSelect, onHov
   );
 }
 
-export default function Board({ system, selected, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect, onMove, onLinkTarget, onRefuse, onHint }: Props) {
+export default function Board({ system, selected, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect, onMove, onLinkTarget, onRefuse, onHint, inset }: Props) {
   const isDim = (b: Block) => hidden.has(b.kind) || (!!focus && !focus.has(b.id));
   const [hoverBlock, setHoverBlock] = useState<{ id: string; x: number; y: number } | null>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -352,7 +358,7 @@ export default function Board({ system, selected, hidden, focus, fitKey, linkFro
     >
       <R3F shadows camera={{ position: [0, 12, 8], fov: 40 }} dpr={[1, 2]} gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }} onPointerMissed={() => onSelect(null)}>
         <Studio />
-        <Rig d={d} fitKey={fitKey} />
+        <Rig d={d} fitKey={fitKey} inset={inset} />
         <color attach="background" args={["#0b0d10"]} />
         <fog attach="fog" args={["#0b0d10", 22, 46]} />
         <hemisphereLight args={["#dfe8f5", "#1a1d23", 0.5]} />

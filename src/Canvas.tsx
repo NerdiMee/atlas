@@ -23,6 +23,8 @@ type Props = {
   onLinkTarget: (id: string) => void;
   /** The pointer is resting on this block or wire: a chance to get its explanation ready. */
   onHint?: (h: { block?: string; link?: string; ghost?: boolean }) => void;
+  /** Overlay widths Fit keeps clear: the cards on the left and right of the stage. */
+  inset?: { left: number; right: number };
 };
 
 type View = { x: number; y: number; k: number };
@@ -58,7 +60,7 @@ function bezier(a: Pt, na: Pt, b: Pt, nb: Pt, t: number) {
   return { d: `M${a.x},${a.y} C${p1.x},${p1.y} ${p2.x},${p2.y} ${b.x},${b.y}`, mid };
 }
 
-export default function Canvas({ system, selected, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect, onMove, onLinkTarget, onHint }: Props) {
+export default function Canvas({ system, selected, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect, onMove, onLinkTarget, onHint, inset }: Props) {
   const [view, setView] = useState<View>({ x: 200, y: 70, k: 0.8 });
   const [hoverBlock, setHoverBlock] = useState<{ id: string; x: number; y: number } | null>(null);
   const hoverTimer = useRef<number | null>(null);
@@ -72,14 +74,14 @@ export default function Canvas({ system, selected, hidden, focus, fitKey, linkFr
     const minY = Math.min(...system.blocks.map((b) => b.y));
     const maxX = Math.max(...system.blocks.map((b) => b.x + b.w));
     const maxY = Math.max(...system.blocks.map((b) => b.y + blockHeight(b)));
-    const left = 200;
-    const availW = host.clientWidth - left - 380;
+    const left = inset?.left ?? 200;
+    const availW = host.clientWidth - left - (inset?.right ?? 380);
     const availH = host.clientHeight - 100;
     const k = Math.min(1.4, Math.max(0.3, Math.min(availW / (maxX - minX + 40), availH / (maxY - minY + 40))));
     setView({ k, x: left + (availW - (maxX - minX) * k) / 2 - minX * k, y: 50 + (availH - (maxY - minY) * k) / 2 - minY * k });
-    // Runs on Fit and when the system changes identity, not on every block move.
+    // Runs on Fit, when the system changes identity or its blocks first arrive, and when the overlays change; not on every block move.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fitKey, system.id]);
+  }, [fitKey, system.id, system.blocks.length > 0, inset?.left, inset?.right]);
   const [panning, setPanning] = useState(false);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
   useEffect(() => {

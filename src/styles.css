@@ -302,3 +302,108 @@ code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; }
 .sheet .seg { justify-self: start; }
 .chip { cursor: pointer; color: var(--ink); }
 .chip.on { background: var(--ink); color: var(--bg); }
+
+/* ---------- Play mode: the game layer ---------- */
+:root { --xp: #f2c14e; --xp-2: rgba(242,193,78,.16); }
+.app.play .top .tools .group.build, .app.play .changes, .app.play .legend, .app.play .top .snap { display: none !important; }
+.app.play .top .mode { margin-right: 4px; }
+.top .mode button { padding: 4px 12px; }
+.top .play-go { background: var(--good); color: #06281a; font-weight: 600; border-radius: 999px; padding: 6px 14px; }
+.top .play-go:hover { background: #5ae8ab; color: #06281a; }
+.top .play-go.on { background: rgba(61,220,151,.18); color: var(--good); }
+
+/* quest card (left) */
+.playcol { position: absolute; left: 16px; top: 16px; bottom: 16px; width: 300px; z-index: 6; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.quest { flex: 0 1 auto; min-height: 0; overflow: auto; background: var(--glass); backdrop-filter: blur(16px); border-radius: var(--r); box-shadow: var(--shadow); padding: 14px 14px 12px; display: grid; gap: 12px; }
+.quest header { display: flex; align-items: center; gap: 12px; }
+.quest header b { display: block; font-size: 14px; }
+.quest header span { color: var(--ink-2); font-size: 12px; }
+.quest .ring { width: 56px; height: 56px; flex: none; transform: rotate(-90deg); }
+.quest .ring circle { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 5; }
+.quest .ring circle.val { stroke: var(--xp); stroke-linecap: round; transition: stroke-dashoffset .8s cubic-bezier(.2,.8,.2,1); }
+.quest .ring text { transform: rotate(90deg); transform-origin: 28px 28px; fill: var(--ink); font-size: 12px; font-weight: 600; font-family: "IBM Plex Mono", monospace; }
+.quest .next { background: var(--xp-2); border-radius: 10px; padding: 10px 12px; display: grid; gap: 4px; }
+.quest .next .k, .pcard .k, .coach .k, .story .kicker { font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-2); }
+.quest .next .k { color: var(--xp); }
+.quest .next b { font-size: 14px; }
+.quest .next p { margin: 0; color: var(--ink); font-size: 12.5px; }
+.quest ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.quest li button { width: 100%; display: flex; align-items: center; gap: 10px; background: none; border: 0; padding: 7px 8px; border-radius: 8px; color: var(--ink); text-align: left; }
+.quest li button:hover { background: var(--bg-3); }
+.quest .check { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--ink-3); display: grid; place-items: center; font-size: 12px; flex: none; transition: background .2s, border-color .2s; }
+.quest li.done .check { background: var(--good); border-color: var(--good); color: #06281a; font-weight: 700; }
+.quest li.done .t { color: var(--ink-2); text-decoration: line-through; text-decoration-color: rgba(255,255,255,.25); }
+.quest .t { flex: 1; }
+.quest .xp { color: var(--ink-3); font-family: "IBM Plex Mono", monospace; font-size: 11px; }
+.quest li.done .xp { color: var(--good); }
+.quest .more { padding: 2px 8px 10px 38px; display: grid; gap: 6px; }
+.quest .more p { margin: 0; font-size: 12.5px; color: var(--ink-2); }
+.quest .more .why span { display: block; color: var(--ink-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; }
+.btn.small { padding: 4px 10px; font-size: 12px; justify-self: start; }
+.btn.ghost { color: var(--ink-2); }
+
+/* pieces key (left, under the quest) */
+.pkey { flex: 1 1 0; min-height: 96px; overflow: auto; background: var(--glass); backdrop-filter: blur(16px); border-radius: var(--r); box-shadow: var(--shadow); padding: 10px 8px; display: grid; gap: 1px; }
+.pkey h4 { margin: 0 0 4px 6px; font-weight: 500; color: var(--ink-3); font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; }
+.pkey button { display: flex; align-items: flex-start; gap: 10px; background: none; border: 0; padding: 6px 6px; border-radius: 8px; color: var(--ink); text-align: left; }
+.pkey button:hover { background: var(--bg-3); }
+.pkey button.off { opacity: .4; }
+.pkey button i { font-style: normal; color: var(--ink-3); font-family: "IBM Plex Mono", monospace; font-size: 11px; margin-left: 4px; }
+.pkey small { color: var(--ink-2); font-size: 11.5px; line-height: 1.35; display: block; }
+
+/* piece / wire / idle cards (right) */
+.pcard { position: absolute; right: 16px; top: 16px; width: 340px; max-height: calc(100% - 32px); overflow: auto; z-index: 6; background: var(--glass); backdrop-filter: blur(16px); border-radius: var(--r); box-shadow: var(--shadow); padding: 18px; display: grid; gap: 12px; align-content: start; }
+.pcard header { display: flex; align-items: center; gap: 12px; }
+.pcard h2 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -.01em; }
+.pcard .tile { width: 46px; height: 46px; border-radius: 12px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--kc, #888) 18%, transparent); }
+.pcard .tile.wire { color: var(--info); background: rgba(79,140,255,.14); }
+.pcard .what { margin: 0; font-size: 14px; line-height: 1.5; }
+.pcard .why { margin: 0; font-size: 13px; color: var(--ink); }
+.pcard .why span { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .1em; color: var(--ink-3); margin-bottom: 2px; }
+.pcard .light { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: center; padding: 9px 12px; border-radius: 10px; background: rgba(255,255,255,.04); font-weight: 500; }
+.pcard .light small { grid-column: 2; font-weight: 400; color: var(--ink-2); font-size: 12px; line-height: 1.4; }
+.pcard .light.good { color: var(--good); } .pcard .light.warn { color: var(--warn); } .pcard .light.bad { color: var(--bad); } .pcard .light.info { color: var(--info); }
+.pcard .light .dot { background: currentColor; width: 9px; height: 9px; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent); }
+.pcard .talks { display: grid; gap: 8px; }
+.pcard .talks > div { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pcard .talks span, .pcard .ends span { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; margin-right: 2px; }
+.pcard .chip { display: inline-flex; align-items: center; gap: 6px; background: rgba(255,255,255,.06); border: 0; border-radius: 999px; padding: 5px 11px; font-size: 12.5px; color: var(--ink); }
+.pcard .chip:hover { background: rgba(79,140,255,.18); color: #fff; }
+.pcard .ends { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pcard .muted { margin: 0; color: var(--ink-3); font-size: 12px; }
+.pcard .tech { margin: 0; display: grid; gap: 6px; font-size: 12px; }
+.pcard .tech div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.pcard .tech dt { color: var(--ink-2); } .pcard .tech dd { margin: 0; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; word-break: break-word; }
+.pcard.idle .howto { margin: 0; padding-left: 18px; display: grid; gap: 6px; color: var(--ink-2); font-size: 13px; }
+.pcard.idle .howto b { color: var(--ink); }
+
+/* story player (bottom centre) */
+.story { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(720px, calc(100% - 700px)); z-index: 8; background: var(--glass); backdrop-filter: blur(18px); border-radius: 16px; box-shadow: var(--shadow); overflow: hidden; }
+.story .bar { height: 3px; background: rgba(255,255,255,.08); } .story .bar span { display: block; height: 100%; background: var(--good); transition: width .35s ease; }
+.story .body { padding: 14px 18px 6px; display: grid; gap: 4px; }
+.story h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+.story p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.story .ctl { display: flex; gap: 6px; padding: 8px 12px 12px; align-items: center; }
+.story .ctl .primary { margin-left: auto; }
+.story .x2 { padding: 6px 9px; }
+@keyframes pop { from { opacity: 0; transform: translateY(6px); } }
+.story .pop { animation: pop .3s ease-out both; }
+@media (max-width: 1400px) { .story { width: min(720px, calc(100% - 32px)); bottom: 16px; } }
+.app.play .hstrip { bottom: 150px; }
+.app.play .caption { bottom: 150px; }
+
+/* coach */
+.coach .sheet { width: min(92vw, 520px); gap: 10px; }
+.coach .note.big { font-size: 15px; line-height: 1.55; color: var(--ink); }
+.coach .row { align-items: center; }
+.coach .spacer { flex: 1; }
+.coach .dots { display: flex; gap: 6px; }
+.coach .dots i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,.18); }
+.coach .dots i.on { background: var(--good); }
+
+/* celebration */
+.confetti { position: absolute; inset: 0; pointer-events: none; z-index: 9; }
+.toast.cheer { border-left-color: var(--xp); font-weight: 500; }
+.toast.cheer b { color: var(--xp); margin-right: 6px; }
+.app.present .quest, .app.present .pkey, .app.present .pcard, .app.present .top .mode, .app.present .play-go { display: none !important; }
+.story ~ .toast { bottom: 196px; }

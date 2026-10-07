@@ -4,15 +4,18 @@ import Canvas, { type MovePhase, type Sel } from "./Canvas";
 import Icon from "./Icons";
 import Panel from "./Panel";
 import { KINDS, ORIGINS, checkAll, checkLink, suggestLinks, tidy, uid, type Block, type Change, type Kind, type Link, type Origin, type Problem, type System, type Tone } from "./model";
-import { describeBlock, describeLink, describeProblem, greeting, suggestClose, suggestStep, suggestSummary, tour } from "./narrate";
+import { describeBlock, describeLink, describeProblem, greeting, story as storyOf, suggestClose, suggestStep, suggestSummary, tour } from "./narrate";
 import { onSpeech, prime, speak, stop as hush } from "./voice";
 import ImportDialog from "./Import";
 import type { Snap } from "./diff";
 import { openReport, tourHtml } from "./report";
+import { Coach, Confetti, Idle, Key, PieceCard, Quest, Story, WireCard, chime } from "./Play";
+import { FRESH, missionsFor, type Progress } from "./missions";
 
 const LS_SYS = (id: string) => `atlas.system.${id}`;
 const LS_LOG = (id: string) => `atlas.changes.${id}`;
 const LS_SNAPS = (id: string) => `atlas.snaps.${id}`;
+const LS_PLAY = (id: string) => `atlas.play.${id}`;
 
 type Saved = { savedAt: string; system: System };
 type Store = { ok: boolean; files: Record<string, Saved> };
@@ -124,6 +127,15 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [fitKey, setFitKey] = useState(0);
   const [newer, setNewer] = useState<Saved | null>(null);
+  // Play mode: missions, the story player and plain cards sit on top of the same map.
+  const [play, setPlay] = useState(() => (params.get("mode") === "build" ? false : params.get("mode") === "play" ? true : read<string>("atlas.mode") !== "build"));
+  const [progress, setProgress] = useState<Progress>(() => ({ ...FRESH, ...(read<Partial<Progress>>(LS_PLAY(sysId)) ?? {}) }));
+  const progFor = useRef(sysId);
+  const [storyAt, setStoryAt] = useState<number | null>(null);
+  const [storyAuto, setStoryAuto] = useState(false);
+  const [coach, setCoach] = useState(() => !read<boolean>("atlas.coached"));
+  const [cheer, setCheer] = useState(0);
+  const bump = useCallback((patch: Partial<Progress> | ((p: Progress) => Progress)) => setProgress((p) => (typeof patch === "function" ? patch(p) : { ...p, ...patch })), []);
   const fileRef = useRef<HTMLInputElement>(null);
   const lastEdit = useRef<{ key: string; at: number }>({ key: "", at: 0 });
 
@@ -197,7 +209,7 @@ export default function App() {
 
   // Whatever is picked is explained aloud, unless the tour picked it.
   useEffect(() => {
-    if (!voice || touring || !sel) return;
+    if (!voice || touring || storyAt !== null || !sel) return;
     if (sel.type === "block") {
       const b = byId.get(sel.id);
       if (b) void speak(describeBlock(system, b, problems));
@@ -233,6 +245,7 @@ export default function App() {
 
   const explain = async () => {
     if (touring) return stopTour();
+    if (storyAt !== null) closeStory(storyAt >= steps.length - 1);
     if (!voice) setVoice(true);
     const id = ++tourRun.current;
     setTouring(true);
@@ -243,7 +256,10 @@ export default function App() {
       setSel(step.sel);
       await speak(step.text);
     }
-    if (tourRun.current === id) setTouring(false);
+    if (tourRun.current === id) {
+      setTouring(false);
+      bump({ tourDone: true });
+    }
   };
 
   const toggleVoice = () => {
@@ -265,6 +281,71 @@ export default function App() {
     return new Set(system.blocks.filter((b) => `${b.title} ${b.sub} ${b.lines.join(" ")} ${KINDS[b.kind].label}`.toLowerCase().includes(t)).map((b) => b.id));
   }, [q, system.blocks]);
 
+  /* ---- Play mode ---- */
+  const missions = useMemo(() => missionsFor(system, problems, progress), [system, problems, progress]);
+  const steps = useMemo(() => storyOf(system, problems), [system, problems]);
+  useEffect(() => write("atlas.mode", play ? "play" : "build"), [play]);
+  useEffect(() => {
+    if (sysId && progFor.current === sysId) write(LS_PLAY(sysId), progress);
+  }, [progress, sysId]);
+  useEffect(() => {
+    progFor.current = sysId;
+    setProgress({ ...FRESH, ...(read<Partial<Progress>>(LS_PLAY(sysId)) ?? {}) });
+    setStoryAt(null);
+  }, [sysId]);
+  // What you click counts, unless the story or the tour clicked it for you.
+  useEffect(() => {
+    if (!sel || touring || storyAt !== null) return;
+    bump((p) => (sel.type === "block" ? (p.seen.includes(sel.id) ? p : { ...p, seen: [...p.seen, sel.id] }) : p.wires.includes(sel.id) ? p : { ...p, wires: [...p.wires, sel.id] }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel]);
+  // A mission just finished: cheer once.
+  useEffect(() => {
+    if (!play || !system.id || system.blocks.length === 0) return;
+    const fresh = missions.filter((m) => m.done && !progress.celebrated.includes(m.id));
+    if (!fresh.length) return;
+    bump((p) => ({ ...p, celebrated: [...p.celebrated, ...fresh.map((m) => m.id)] }));
+    if (!mute) chime();
+    setCheer(Date.now());
+    setToast({ tone: "good", text: `Mission complete: ${fresh.map((m) => m.title).join(", ")} · +${fresh.reduce((n, m) => n + m.xp, 0)} XP` });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missions, play]);
+  const storyStep = storyAt === null || !steps.length ? null : steps[Math.min(storyAt, steps.length - 1)];
+  const closeStory = (finished: boolean) => {
+    if (finished) bump({ storyDone: true });
+    setStoryAt(null);
+    setSel(null);
+    hush();
+  };
+  // Each step lights its piece or wire and speaks once if the voice is on.
+  const [spoken, setSpoken] = useState<number | null>(null);
+  useEffect(() => {
+    if (!storyStep) return;
+    stopTour();
+    setSuggestions(null);
+    setSel(storyStep.sel);
+    setSpoken(null);
+    let cancelled = false;
+    if (voice) void speak(storyStep.text).then(() => { if (!cancelled) setSpoken(storyAt); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyAt]);
+  // Auto moves on by itself: a moment after the voice finishes, or every few seconds without it.
+  useEffect(() => {
+    if (!storyStep || !storyAuto || storyAt === null) return;
+    if (voice && spoken !== storyAt) return;
+    const timer = window.setTimeout(() => setStoryAt((i) => (i !== null && i < steps.length - 1 ? i + 1 : i)), voice ? 700 : 5500);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storyAt, storyAuto, spoken]);
+  const storyFocus = useMemo(() => {
+    if (!storyStep?.sel) return null;
+    if (storyStep.sel.type === "block") return new Set([storyStep.sel.id]);
+    const id = storyStep.sel.id;
+    const l = system.links.find((x) => x.id === id);
+    return l ? new Set([l.from, l.to]) : null;
+  }, [storyStep, system.links]);
+
   const log = useCallback((tone: Tone, text: string) => {
     setChanges((c) => [{ at: stamp(), tone, text }, ...c].slice(0, 60));
   }, []);
@@ -277,11 +358,12 @@ export default function App() {
       if (p.level === "bad") {
         setBuzzed(true);
         if (blockId) setShake({ id: blockId, n: Date.now() });
+        bump((q) => ({ ...q, refusals: q.refusals + 1 }));
       }
       log(p.level, p.level === "bad" ? `Refused: ${p.reason}` : `Flagged: ${p.reason}`);
       if (voice) void speak(describeProblem(p));
     },
-    [log, mute, voice],
+    [log, mute, voice, bump],
   );
 
   /** Snapshot for undo, named after what is about to happen. Rapid edits to the same field share one. */
@@ -491,6 +573,7 @@ export default function App() {
     setSystem((s) => ({ ...s, blocks: tidy(s) }));
     setFitKey((k) => k + 1);
     log("info", "Tidied: clients, servers, platform, stores, outside, left to right");
+    bump({ tidied: true });
   };
 
   const undo = useCallback(() => {
@@ -619,6 +702,10 @@ export default function App() {
       const t = e.target as HTMLElement | null;
       const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
       if (e.key === "Escape") {
+        if (storyAt !== null) {
+          closeStory(storyAt >= steps.length - 1);
+          return;
+        }
         if (present && !touring && !linkFrom && !menu && !suggestions) setPresent(false);
         setImporting(false);
         stopTour();
@@ -659,10 +746,11 @@ export default function App() {
   const clouds = system.blocks.filter((b) => ["supabase", "vercel"].includes(b.kind)).length;
   const bad = [...problems.entries()].filter(([, p]) => p.level === "bad").map(([id]) => id);
 
-  const viewProps = { system, selected: sel, hidden, focus, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect: setSel, onMove, onLinkTarget: linkTarget, onHint };
+  const selLink = sel?.type === "link" ? system.links.find((l) => l.id === sel.id) : undefined;
+  const viewProps = { system, selected: sel, hidden, focus: storyFocus ?? focus, inset: play ? { left: 332, right: 372 } : { left: 200, right: 380 }, fitKey, linkFrom, problems, suggestions, spot, shake, onSelect: setSel, onMove, onLinkTarget: linkTarget, onHint };
 
   return (
-    <div className={`app${present ? " present" : ""}`}>
+    <div className={`app${present ? " present" : ""}${play ? " play" : ""}`}>
       <header className="top">
         <span className="brand">Atlas</span>
         <span className="crumb">
@@ -694,8 +782,16 @@ export default function App() {
             </button>
           )}
         </span>
+        <span className="seg mode" role="group" aria-label="Mode">
+          <button className={play ? "on" : ""} onClick={() => { setPlay(true); setLinkFrom(null); setMenu(null); setSuggestions(null); }} aria-pressed={play} title="Missions, the story and plain cards">
+            Play
+          </button>
+          <button className={!play ? "on" : ""} onClick={() => { setPlay(false); if (storyAt !== null) closeStory(false); }} aria-pressed={!play} title="All the tools: add, wire, tidy, save">
+            Build
+          </button>
+        </span>
         <div className="tools">
-          <div className="group">
+          <div className="group build">
           <div className="menu">
             <button className="btn primary" onClick={() => setMenu((m) => (m === "add" ? null : "add"))} aria-expanded={menu === "add"}>
               + Block
@@ -718,6 +814,11 @@ export default function App() {
           </button>
           </div>
           <div className="group">
+          {play && system.id && (
+            <button className={`btn play-go${storyAt !== null ? " on" : ""}`} onClick={() => (storyAt === null ? setStoryAt(0) : closeStory(false))} title="Go through the system one step at a time">
+              {storyAt !== null ? "Stop the story" : "▶ Play the story"}
+            </button>
+          )}
           <button className={`btn voice${voice ? " on" : ""}`} onClick={toggleVoice} title="The voice explains what you select, and why a wire is refused" aria-pressed={voice}>
             {voice ? "Voice on" : "Voice"}
           </button>
@@ -728,7 +829,7 @@ export default function App() {
             Present
           </button>
           </div>
-          <div className="group">
+          <div className="group build">
           <button className="btn" onClick={doTidy} title="Arrange by role: clients, servers, platform, stores, outside">
             Tidy
           </button>
@@ -739,7 +840,7 @@ export default function App() {
             Undo
           </button>
           </div>
-          <div className="group">
+          <div className="group build">
           {store.ok && (
             <button className={`btn${dirty ? " boxed" : ""}`} onClick={saveToProject} title="Write this map to data/<system>.json (⌘S)">
               {dirty ? "Save" : "Saved"}
@@ -802,6 +903,23 @@ export default function App() {
       </header>
 
       <div className={`stage${buzzed ? " buzzed" : ""}`}>
+        {play && system.id && (
+          <div className="playcol">
+            <Quest missions={missions} onBuild={() => setPlay(false)} />
+            <Key
+              counts={counts}
+              hidden={hidden}
+              onToggle={(k) =>
+                setHidden((h) => {
+                  const n = new Set(h);
+                  if (n.has(k)) n.delete(k);
+                  else n.add(k);
+                  return n;
+                })
+              }
+            />
+          </div>
+        )}
         <nav className="legend" aria-label="Block kinds">
           <input
             id="find"
@@ -904,6 +1022,15 @@ export default function App() {
           )}
         </section>
 
+        {play && !suggestions && panelMode === "auto" && system.id ? (
+          sel?.type === "block" && byId.get(sel.id) ? (
+            <PieceCard key={sel.id} system={system} block={byId.get(sel.id)!} problems={problems} onSelect={setSel} />
+          ) : sel?.type === "link" && selLink ? (
+            <WireCard system={system} link={selLink} problem={problems.get(selLink.id)} onSelect={setSel} />
+          ) : (
+            <Idle system={system} onStory={() => setStoryAt(0)} />
+          )
+        ) : (
         <Panel
           system={system}
           sel={sel}
@@ -927,6 +1054,19 @@ export default function App() {
           onDeleteSnap={deleteSnap}
           onCloseVersions={() => setPanelMode("auto")}
         />
+        )}
+        {storyStep && storyAt !== null && (
+          <Story steps={steps} index={Math.min(storyAt, steps.length - 1)} auto={storyAuto} onIndex={setStoryAt} onAuto={setStoryAuto} onClose={() => closeStory(storyAt >= steps.length - 1)} />
+        )}
+        <Confetti seed={cheer} />
+        {play && coach && !!system.id && !importing && (
+          <Coach
+            onDone={() => {
+              setCoach(false);
+              write("atlas.coached", true);
+            }}
+          />
+        )}
 
         {caption && (
           <div className="caption" role="status" aria-live="polite">
